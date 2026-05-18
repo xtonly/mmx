@@ -1,4 +1,4 @@
-cat << 'EOF' > mmx_manager.sh && chmod +x mmx_manager.sh && ./mmx_manager.sh
+cat << 'EOF_SCRIPT' > mmx_manager.sh && chmod +x mmx_manager.sh && ./mmx_manager.sh
 #!/bin/bash
 
 # 颜色定义
@@ -167,4 +167,4 @@ show_menu() {
 }
 
 show_menu
-EOF
+EOF_SCRIPT
