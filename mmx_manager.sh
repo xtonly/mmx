@@ -5,6 +5,7 @@ cat << 'EOF_SCRIPT' > mmx_manager.sh && chmod +x mmx_manager.sh && ./mmx_manager
 RED='\033[0;31m'
 GREEN='\033[0;32m'
 YELLOW='\033[0;33m'
+BLUE='\033[0;34m'
 NC='\033[0m'
 
 # 检查权限
@@ -23,7 +24,6 @@ install_docker() {
         systemctl enable --now docker
     fi
     
-    # 检查新版 docker compose 插件或老版 docker-compose
     if ! docker compose version &> /dev/null && ! command -v docker-compose &> /dev/null; then
         echo -e "${YELLOW}未检测到 Docker Compose 插件，正在尝试安装...${NC}"
         if command -v apt-get &> /dev/null; then
@@ -43,26 +43,31 @@ get_compose_cmd() {
     fi
 }
 
-# 安装妙妙屋X
+# 1. 全新安装 (带端口冲突检测重试)
 install_app() {
+    if [ -f "${APP_DIR}/docker-compose.yml" ]; then
+        echo -e "${RED}检测到已安装配置，请使用更新或卸载功能。${NC}"
+        read -n 1 -s -r -p "按任意键返回菜单..."
+        return
+    fi
+
     install_docker
     COMPOSE_CMD=$(get_compose_cmd)
-
-    echo -e "${GREEN}===================================${NC}"
-    read -p "请输入你想使用的面板端口 [默认 12889]: " PORT
-    PORT=${PORT:-12889}
-    
-    # 随机生成一个 JWT 密钥增强安全性
-    JWT_SECRET=$(date +%s | sha256sum | base64 | head -c 32)
 
     echo -e "${YELLOW}正在创建安装目录: ${APP_DIR}...${NC}"
     mkdir -p "${APP_DIR}"
     cd "${APP_DIR}"
 
-    echo -e "${YELLOW}正在生成配置 docker-compose.yml...${NC}"
-    cat <<EOF > docker-compose.yml
-version: '3.8'
+    JWT_SECRET=$(date +%s | sha256sum | base64 | head -c 32)
 
+    # 进入端口设置与启动循环
+    while true; do
+        echo -e "${GREEN}===================================${NC}"
+        read -p "请输入你想使用的面板端口 [默认 12889]: " PORT
+        PORT=${PORT:-12889}
+
+        echo -e "${YELLOW}正在生成配置 docker-compose.yml...${NC}"
+        cat <<EOF > docker-compose.yml
 services:
   miaomiaowux:
     image: ghcr.io/iluobei/miaomiaowux:latest
@@ -81,89 +86,133 @@ services:
       - ./rule_templates:/app/rule_templates
 EOF
 
-    echo -e "${YELLOW}正在拉取最新镜像并启动容器...${NC}"
-    $COMPOSE_CMD pull
-    $COMPOSE_CMD up -d
+        echo -e "${YELLOW}正在拉取镜像并启动容器...${NC}"
+        $COMPOSE_CMD pull
+        $COMPOSE_CMD up -d
 
-    if [ $? -eq 0 ]; then
-        IP=$(curl -s https://api.ipify.org || curl -s ifconfig.me)
-        echo -e "${GREEN}===================================================${NC}"
-        echo -e "${GREEN}🎉 恭喜！妙妙屋X 一键 Docker 安装成功！${NC}"
-        echo -e "${GREEN}👉 面板访问地址: http://${IP}:${PORT}${NC}"
-        echo -e "${GREEN}📂 数据安装目录: ${APP_DIR}${NC}"
-        echo -e "${YELLOW}⚠️ 注意：请确保您服务器的安全组/防火墙已放行端口: ${PORT}${NC}"
-        echo -e "${GREEN}===================================================${NC}"
-    else
-        echo -e "${RED}❌ 启动失败，请检查端口 ${PORT} 是否被占用，或检查网络是否能连接到 ghcr.io 镜像源！${NC}"
-    fi
-}
-
-# 卸载功能
-uninstall_app() {
-    COMPOSE_CMD=$(get_compose_cmd)
-    if [ -d "${APP_DIR}" ]; then
-        cd "${APP_DIR}"
-        echo -e "${YELLOW}正在停止并删除妙妙屋X容器...${NC}"
-        $COMPOSE_CMD down
-        echo -e "${RED}为了防止误删，脚本默认不会自动清除数据文件夹。${NC}"
-        read -p "是否需要删除所有数据（包括订阅、配置、数据库）？(y/n) [默认 n]: " DEL_DATA
-        if [[ "$DEL_DATA" == "y" || "$DEL_DATA" == "Y" ]]; then
-            rm -rf "${APP_DIR}"
-            echo -e "${GREEN}完全卸载成功，所有数据已被清除！${NC}"
+        if [ $? -eq 0 ]; then
+            IP=$(curl -s https://api.ipify.org || curl -s ifconfig.me)
+            echo -e "${GREEN}===================================================${NC}"
+            echo -e "${GREEN}🎉 恭喜！妙妙屋X 一键安装成功！${NC}"
+            echo -e "${GREEN}👉 面板访问地址: http://${IP}:${PORT}${NC}"
+            echo -e "${YELLOW}⚠️ 注意：请确保防火墙已放行端口: ${PORT}${NC}"
+            echo -e "${GREEN}===================================================${NC}"
+            break # 成功启动，跳出循环
         else
-            rm -f docker-compose.yml
-            echo -e "${GREEN}容器已卸载。您的数据仍保留在目录: ${APP_DIR}${NC}"
+            echo -e "${RED}❌ 启动失败！端口 ${PORT} 可能被占用，或存在网络问题。${NC}"
+            read -p "是否更换一个新端口重新尝试？(y/n) [默认 y]: " RETRY
+            RETRY=${RETRY:-y}
+            if [[ "$RETRY" == "y" || "$RETRY" == "Y" ]]; then
+                echo -e "${YELLOW}正在清理失败的容器状态，准备重试...${NC}"
+                $COMPOSE_CMD down 2>/dev/null
+                # 继续下一次循环，重新要求输入端口
+            else
+                echo -e "${RED}已取消安装。正在清理残留文件...${NC}"
+                $COMPOSE_CMD down 2>/dev/null
+                rm -rf "${APP_DIR}"
+                break # 放弃安装，跳出循环
+            fi
         fi
-    else
-        echo -e "${RED}错误：未找到安装目录 ${APP_DIR}，您可能尚未安装。${NC}"
-    fi
+    done
+    read -n 1 -s -r -p "按任意键返回菜单..."
 }
 
-# 重启功能
-restart_app() {
+# 2. 更新应用
+update_app() {
+    if [ ! -f "${APP_DIR}/docker-compose.yml" ]; then
+        echo -e "${RED}未找到配置文件，请先执行安装！${NC}"
+        read -n 1 -s -r -p "按任意键返回菜单..."
+        return
+    fi
+    
     COMPOSE_CMD=$(get_compose_cmd)
-    if [ -d "${APP_DIR}" ]; then
-        cd "${APP_DIR}"
-        $COMPOSE_CMD restart
-        echo -e "${GREEN}妙妙屋X 已完成重启！${NC}"
-    else
-        echo -e "${RED}错误：安装目录不存在。${NC}"
-    fi
+    cd "${APP_DIR}"
+    echo -e "${YELLOW}正在拉取最新镜像...${NC}"
+    $COMPOSE_CMD pull
+    echo -e "${YELLOW}正在重建并重启容器...${NC}"
+    $COMPOSE_CMD up -d
+    echo -e "${GREEN}更新完成！${NC}"
+    read -n 1 -s -r -p "按任意键返回菜单..."
 }
 
-# 查看日志
+# 3. 卸载应用
+uninstall_app() {
+    if [ ! -d "${APP_DIR}" ]; then
+        echo -e "${RED}错误：未找到安装目录，您可能尚未安装。${NC}"
+        read -n 1 -s -r -p "按任意键返回菜单..."
+        return
+    fi
+    
+    COMPOSE_CMD=$(get_compose_cmd)
+    cd "${APP_DIR}"
+    echo -e "${YELLOW}正在停止并删除容器...${NC}"
+    $COMPOSE_CMD down
+    
+    read -p "是否需要彻底删除所有数据（配置、数据库等）？(y/n) [默认 n]: " DEL_DATA
+    if [[ "$DEL_DATA" == "y" || "$DEL_DATA" == "Y" ]]; then
+        cd /opt
+        rm -rf "${APP_DIR}"
+        echo -e "${GREEN}完全卸载成功，所有数据已被清除！${NC}"
+    else
+        rm -f docker-compose.yml
+        echo -e "${GREEN}容器已卸载。您的数据保留在目录: ${APP_DIR}${NC}"
+    fi
+    read -n 1 -s -r -p "按任意键返回菜单..."
+}
+
+# 4. 查看日志
 view_logs() {
     COMPOSE_CMD=$(get_compose_cmd)
     if [ -d "${APP_DIR}" ]; then
         cd "${APP_DIR}"
-        echo -e "${YELLOW}正在实时查看日志（按 Ctrl+C 退出日志查看）...${NC}"
+        echo -e "${YELLOW}正在查看日志（按 Ctrl+C 退出返回终端）...${NC}"
         $COMPOSE_CMD logs -f --tail 100
     else
         echo -e "${RED}错误：安装目录不存在。${NC}"
+        read -n 1 -s -r -p "按任意键返回菜单..."
     fi
+}
+
+# 5. 查看状态
+check_status() {
+    if [ ! -d "${APP_DIR}" ]; then
+        echo -e "${RED}尚未安装 妙妙屋X。${NC}"
+    else
+        echo -e "${BLUE}=== 容器运行状态 ===${NC}"
+        docker ps -a --filter "name=miaomiaowux" --format "table {{.Names}}\t{{.Status}}\t{{.Ports}}"
+        echo -e "\n${BLUE}=== 系统资源占用 ===${NC}"
+        docker stats --no-stream miaomiaowux 2>/dev/null || echo "容器未运行"
+    fi
+    echo ""
+    read -n 1 -s -r -p "按任意键返回菜单..."
 }
 
 # 脚本主菜单
 show_menu() {
-    clear
-    echo -e "${GREEN}===================================${NC}"
-    echo -e "${GREEN}     妙妙屋X 一键 Docker 管理脚本     ${NC}"
-    echo -e "${GREEN}===================================${NC}"
-    echo -e " 1. 安装 / 更新 妙妙屋X"
-    echo -e " 2. 重启 妙妙屋X"
-    echo -e " 3. 查看 运行日志"
-    echo -e " 4. 卸载 妙妙屋X"
-    echo -e " 0. 退出脚本"
-    echo -e "${GREEN}===================================${NC}"
-    read -p "请输入数字选择 [0-4]: " CHOICE
+    while true; do
+        clear
+        echo -e "${GREEN}===================================${NC}"
+        echo -e "${GREEN}     妙妙屋X 容器管理工具 v1.2       ${NC}"
+        echo -e "${GREEN}===================================${NC}"
+        echo -e " ${BLUE}1.${NC} 安装 妙妙屋X"
+        echo -e " ${BLUE}2.${NC} 更新 妙妙屋X"
+        echo -e " ${BLUE}3.${NC} 查看 当前状态"
+        echo -e " ${BLUE}4.${NC} 查看 运行日志"
+        echo -e " ${BLUE}5.${NC} 卸载 妙妙屋X"
+        echo -e " ${BLUE}0.${NC} 退出脚本"
+        echo -e "${GREEN}===================================${NC}"
+        read -p "请输入数字选择 [0-5]: " CHOICE
 
-    case $CHOICE in
-        1) install_app ;;
-        2) restart_app ;;
-        3) view_logs ;;
-        4) uninstall_app ;;
-        *) exit 0 ;;
-    esac
+        case $CHOICE in
+            1) install_app ;;
+            2) update_app ;;
+            3) check_status ;;
+            4) view_logs ;;
+            5) uninstall_app ;;
+            0) exit 0 ;;
+            *) echo -e "${RED}无效输入！${NC}" && sleep 1 ;;
+        esac
+    done
 }
 
 show_menu
