@@ -2,7 +2,7 @@
 脚本说明
 一键脚本：
 
-
+wget --no-check-certificate -O mmx_manager.sh https://raw.githubusercontent.com/xtonly/mmx/refs/heads/main/mmx_manager.sh && chmod +x mmx_manager.sh && ./mmx_manager.sh
 
 执行过上面的一键命令后，脚本文件会保存在你当前目录下的 mmx_manager.sh。
 
