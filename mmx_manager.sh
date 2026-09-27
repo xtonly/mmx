@@ -74,16 +74,20 @@ services:
     container_name: miaomiaowux
     restart: unless-stopped
     user: root
+    # 采用官方推荐的 host 模式，解决后续节点多端口映射问题
+    network_mode: host
     environment:
       - PORT=${PORT}
       - LOG_LEVEL=info
       - JWT_SECRET=${JWT_SECRET}
-    ports:
-      - "${PORT}:${PORT}"
+      # 强制开启公网访问，绕过 503 拦截限制
+      - MMWX_FORCE_PUBLIC_ACCESS=1
     volumes:
       - ./data:/app/data
       - ./subscribes:/app/subscribes
       - ./rule_templates:/app/rule_templates
+      # 同步宿主机时区，修复流量统计时间差
+      - /etc/localtime:/etc/localtime:ro
 EOF
 
         echo -e "${YELLOW}正在拉取镜像并启动容器...${NC}"
@@ -192,7 +196,7 @@ show_menu() {
     while true; do
         clear
         echo -e "${GREEN}===================================${NC}"
-        echo -e "${GREEN}     妙妙屋X 容器管理工具 v1.2       ${NC}"
+        echo -e "${GREEN}     妙妙屋X 容器管理工具 v1.3       ${NC}"
         echo -e "${GREEN}===================================${NC}"
         echo -e " ${BLUE}1.${NC} 安装 妙妙屋X"
         echo -e " ${BLUE}2.${NC} 更新 妙妙屋X"
