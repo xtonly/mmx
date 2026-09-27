@@ -176,7 +176,7 @@ show_menu() {
     while true; do
         clear
         echo -e "${GREEN}===================================${NC}"
-        echo -e "${GREEN}   妙妙屋X 管理工具 (IPv6 节点增强版)  ${NC}"
+        echo -e "${GREEN}        妙妙屋X 管理工具 1.4        ${NC}"
         echo -e "${GREEN}===================================${NC}"
         echo -e " ${BLUE}1.${NC} 安装 妙妙屋X"
         echo -e " ${BLUE}2.${NC} 更新 妙妙屋X"
